@@ -20,6 +20,25 @@ type WalletAccount = {
   createdAt: string;
 };
 
+type DemoBank = {
+  code: string;
+  name: string;
+  country: string;
+  currencies: string[];
+};
+
+type DemoBankAccount = {
+  id: string;
+  bankCode: string;
+  bankName: string;
+  accountName: string;
+  accountNumberLast4: string;
+  currency: string;
+  balanceMinor: string;
+  status: string;
+  createdAt: string;
+};
+
 function formatJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
@@ -29,10 +48,20 @@ export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [idToken, setIdToken] = useState("");
   const [accounts, setAccounts] = useState<WalletAccount[]>([]);
+  const [demoBanks, setDemoBanks] = useState<DemoBank[]>([]);
+  const [demoBankAccounts, setDemoBankAccounts] = useState<DemoBankAccount[]>([]);
   const [currency, setCurrency] = useState("SSP");
   const [toAccountId, setToAccountId] = useState("");
   const [fromAccountId, setFromAccountId] = useState("");
   const [amountMinor, setAmountMinor] = useState("1000");
+  const [selectedBankCode, setSelectedBankCode] = useState("KCB_SS");
+  const [bankAccountName, setBankAccountName] = useState("Jane Deng");
+  const [bankAccountNumber, setBankAccountNumber] = useState("123456789");
+  const [bankOpeningBalanceMinor, setBankOpeningBalanceMinor] = useState("750000");
+  const [selectedDemoBankAccountId, setSelectedDemoBankAccountId] = useState("");
+  const [depositWalletAccountId, setDepositWalletAccountId] = useState("");
+  const [depositAmountMinor, setDepositAmountMinor] = useState("125000");
+  const [depositCurrency, setDepositCurrency] = useState("SSP");
   const [referenceId, setReferenceId] = useState(() => crypto.randomUUID());
   const [loading, setLoading] = useState(false);
   const [syncingUser, setSyncingUser] = useState(false);
@@ -69,6 +98,31 @@ export default function Home() {
           const customerAccount = data.find((account) => account.accountType === "CUSTOMER");
           if (customerAccount) {
             setFromAccountId(customerAccount.id);
+            setDepositWalletAccountId(customerAccount.id);
+            setDepositCurrency(customerAccount.currency);
+          }
+        }
+
+        const banksResult = await callWiseApi(nextUser, "/demo/banks");
+        if (cancelled) return;
+
+        const banks = (banksResult.body as { data?: DemoBank[] } | undefined)?.data;
+        if (Array.isArray(banks)) {
+          setDemoBanks(banks);
+          if (banks[0]) {
+            setSelectedBankCode(banks[0].code);
+          }
+        }
+
+        const bankAccountsResult = await callWiseApi(nextUser, "/demo/bank-accounts");
+        if (cancelled) return;
+
+        const bankAccounts = (bankAccountsResult.body as { data?: DemoBankAccount[] } | undefined)?.data;
+        if (Array.isArray(bankAccounts)) {
+          setDemoBankAccounts(bankAccounts);
+          if (bankAccounts[0]) {
+            setSelectedDemoBankAccountId(bankAccounts[0].id);
+            setDepositCurrency(bankAccounts[0].currency);
           }
         }
       } catch (caught) {
@@ -92,6 +146,8 @@ export default function Home() {
         if (!nextUser) {
           setIdToken("");
           setAccounts([]);
+          setDemoBanks([]);
+          setDemoBankAccounts([]);
           setProfile(null);
           return;
         }
@@ -172,6 +228,67 @@ export default function Home() {
     }
   }
 
+  async function listDemoBanks() {
+    const apiResult = await callApi("/demo/banks");
+    const data = (apiResult?.body as { data?: DemoBank[] } | undefined)?.data;
+    if (Array.isArray(data)) {
+      setDemoBanks(data);
+      if (!selectedBankCode && data[0]) {
+        setSelectedBankCode(data[0].code);
+      }
+    }
+  }
+
+  async function listDemoBankAccounts() {
+    const apiResult = await callApi("/demo/bank-accounts");
+    const data = (apiResult?.body as { data?: DemoBankAccount[] } | undefined)?.data;
+    if (Array.isArray(data)) {
+      setDemoBankAccounts(data);
+      if (!selectedDemoBankAccountId && data[0]) {
+        setSelectedDemoBankAccountId(data[0].id);
+        setDepositCurrency(data[0].currency);
+      }
+    }
+  }
+
+  async function linkDemoBankAccount() {
+    const apiResult = await callApi("/demo/bank-accounts", {
+      method: "POST",
+      body: JSON.stringify({
+        bankCode: selectedBankCode,
+        accountName: bankAccountName,
+        accountNumber: bankAccountNumber,
+        currency: depositCurrency,
+        openingBalanceMinor: bankOpeningBalanceMinor,
+      }),
+    });
+
+    const account = (apiResult?.body as { data?: DemoBankAccount } | undefined)?.data;
+    if (account?.id) {
+      setSelectedDemoBankAccountId(account.id);
+      setDepositCurrency(account.currency);
+      await listDemoBankAccounts();
+    }
+  }
+
+  async function submitBankDeposit() {
+    await callApi("/wallet/deposits/bank", {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": `bank-deposit-${crypto.randomUUID()}`,
+      },
+      body: JSON.stringify({
+        demoBankAccountId: selectedDemoBankAccountId,
+        walletAccountId: depositWalletAccountId,
+        amountMinor: depositAmountMinor,
+        currency: depositCurrency,
+        referenceId: crypto.randomUUID(),
+      }),
+    });
+    await listDemoBankAccounts();
+    await listAccounts();
+  }
+
   async function submitTransfer() {
     await callApi("/wallet/transfers", {
       method: "POST",
@@ -226,7 +343,7 @@ export default function Home() {
           <h1>Google sign-in and wallet endpoint smoke tests.</h1>
           <p>
             Use this tiny app to get a Firebase ID token, create your customer wallet,
-            list wallet accounts, and send test transfer requests to the Cloud Run API.
+            link demo bank accounts, move money into Wise, and send test transfer requests.
           </p>
         </div>
 
@@ -250,7 +367,7 @@ export default function Home() {
                 onClick={openAdminDashboard}
                 disabled={adminChecking}
               >
-                {adminChecking ? "Checking access..." : "Admin dashboard"}
+                {adminChecking ? "Checking access..." : "Admin console"}
               </button>
             </>
           ) : (
@@ -318,6 +435,126 @@ export default function Home() {
             ))
           )}
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Demo bank funding</h2>
+            <p className="muted">Link a simulated bank account and deposit money into the selected Wise wallet.</p>
+          </div>
+          <div className="button-row">
+            <button type="button" onClick={listDemoBanks} disabled={!user || loading}>
+              Refresh banks
+            </button>
+            <button className="secondary-button" type="button" onClick={listDemoBankAccounts} disabled={!user || loading}>
+              Refresh linked accounts
+            </button>
+          </div>
+        </div>
+
+        <div className="form-grid">
+          <label>
+            Bank
+            <select value={selectedBankCode} onChange={(event) => setSelectedBankCode(event.target.value)}>
+              {demoBanks.length === 0 ? (
+                <option value={selectedBankCode}>{selectedBankCode}</option>
+              ) : (
+                demoBanks.map((bank) => (
+                  <option key={bank.code} value={bank.code}>
+                    {bank.name}
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <label>
+            Account name
+            <input value={bankAccountName} onChange={(event) => setBankAccountName(event.target.value)} />
+          </label>
+          <label>
+            Account number
+            <input
+              value={bankAccountNumber}
+              onChange={(event) => setBankAccountNumber(event.target.value.replace(/[^\d]/g, ""))}
+            />
+          </label>
+          <label>
+            Opening balance minor
+            <input
+              value={bankOpeningBalanceMinor}
+              onChange={(event) => setBankOpeningBalanceMinor(event.target.value.replace(/[^\d]/g, ""))}
+            />
+          </label>
+        </div>
+
+        <button
+          type="button"
+          onClick={linkDemoBankAccount}
+          disabled={!user || loading || !selectedBankCode || !bankAccountName || !bankAccountNumber}
+        >
+          Link demo bank account
+        </button>
+
+        <div className="account-list">
+          {demoBankAccounts.length === 0 ? (
+            <p className="muted">No linked demo bank accounts loaded yet.</p>
+          ) : (
+            demoBankAccounts.map((account) => (
+              <button
+                className="account-row"
+                key={account.id}
+                type="button"
+                onClick={() => {
+                  setSelectedDemoBankAccountId(account.id);
+                  setDepositCurrency(account.currency);
+                }}
+              >
+                <span>
+                  <strong>{account.bankName}</strong>
+                  <small>{account.accountName} ending {account.accountNumberLast4}</small>
+                  <small>{account.id}</small>
+                </span>
+                <span>
+                  {account.balanceMinor} {account.currency}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="form-grid">
+          <label>
+            Demo bank account ID
+            <input
+              value={selectedDemoBankAccountId}
+              onChange={(event) => setSelectedDemoBankAccountId(event.target.value)}
+            />
+          </label>
+          <label>
+            Wise wallet account ID
+            <input value={depositWalletAccountId} onChange={(event) => setDepositWalletAccountId(event.target.value)} />
+          </label>
+          <label>
+            Deposit amount minor
+            <input
+              value={depositAmountMinor}
+              onChange={(event) => setDepositAmountMinor(event.target.value.replace(/[^\d]/g, ""))}
+            />
+          </label>
+          <label>
+            Currency
+            <input value={depositCurrency} onChange={(event) => setDepositCurrency(event.target.value.toUpperCase())} />
+          </label>
+        </div>
+
+        <button
+          type="button"
+          onClick={submitBankDeposit}
+          disabled={!user || loading || !selectedDemoBankAccountId || !depositWalletAccountId || !depositAmountMinor}
+        >
+          Deposit into Wise wallet
+        </button>
       </section>
 
       <section className="panel">

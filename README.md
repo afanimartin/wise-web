@@ -48,4 +48,11 @@ http://localhost:3000
 - Firebase ID token retrieval
 - `POST /wallet/accounts/customer`
 - `GET /wallet/accounts`
+- `GET /demo/banks`
+- `POST /demo/bank-accounts`
+- `GET /demo/bank-accounts`
+- `POST /wallet/deposits/bank`
 - `POST /wallet/transfers`
+
+For local demo bank funding, make sure the backend has run through
+`packages/database/migrations/0004_demo_bank_accounts.sql`.
